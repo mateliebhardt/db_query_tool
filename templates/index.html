@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DB Query Tool</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f4f6f9;
+      color: #1a1a2e;
+      padding: 2rem;
+    }
+
+    h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: #2c3e6b; }
+
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.1);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: flex-end;
+    }
+
+    .field { display: flex; flex-direction: column; gap: .3rem; }
+    label  { font-size: .85rem; font-weight: 600; color: #555; }
+
+    input[type="date"] {
+      padding: .45rem .7rem;
+      border: 1px solid #d0d5dd;
+      border-radius: 6px;
+      font-size: .95rem;
+      outline: none;
+    }
+    input[type="date"]:focus { border-color: #4a6cf7; }
+
+    .btn {
+      padding: .5rem 1.2rem;
+      border: none;
+      border-radius: 6px;
+      font-size: .95rem;
+      cursor: pointer;
+      font-weight: 600;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .85; }
+    .btn-primary  { background: #4a6cf7; color: #fff; }
+    .btn-success  { background: #27ae60; color: #fff; }
+    .btn-success:disabled { background: #aaa; cursor: default; }
+
+    .meta {
+      font-size: .85rem;
+      color: #666;
+      margin-bottom: .75rem;
+    }
+
+    .error {
+      background: #fff0f0;
+      border: 1px solid #f5c6c6;
+      color: #c0392b;
+      padding: .8rem 1rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+      font-size: .9rem;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      max-height: 60vh;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: .88rem;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      background: #2c3e6b;
+      color: #fff;
+      padding: .6rem .9rem;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    tbody tr:nth-child(even) { background: #f8f9fc; }
+    tbody tr:hover           { background: #eef1fb; }
+
+    td {
+      padding: .55rem .9rem;
+      border-bottom: 1px solid #eaecf0;
+      white-space: nowrap;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 2rem;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Database Query Tool</h1>
+
+<div class="card">
+  <form method="POST" action="/" id="queryForm">
+    <div class="filter-row">
+      <div class="field">
+        <label for="start_date">From</label>
+        <input type="date" id="start_date" name="start_date" value="{{ start_date }}" required />
+      </div>
+      <div class="field">
+        <label for="end_date">To</label>
+        <input type="date" id="end_date" name="end_date" value="{{ end_date }}" required />
+      </div>
+      <button type="submit" class="btn btn-primary">Run Query</button>
+    </div>
+  </form>
+</div>
+
+{% if error %}
+  <div class="error"><strong>Error:</strong> {{ error }}</div>
+{% endif %}
+
+{% if columns %}
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem;">
+    <span class="meta">{{ row_count }} row{{ 's' if row_count != 1 else '' }} returned
+      &nbsp;·&nbsp; {{ start_date }} → {{ end_date }}</span>
+
+    <form method="POST" action="/download">
+      <input type="hidden" name="start_date" value="{{ start_date }}" />
+      <input type="hidden" name="end_date"   value="{{ end_date }}" />
+      <button type="submit" class="btn btn-success">⬇ Download Excel</button>
+    </form>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          {% for col in columns %}
+          <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          {% for cell in row %}
+          <td>{{ cell if cell is not none else '' }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% elif request.method == 'POST' and not error %}
+  <div class="card">
+    <p class="empty">No results found for this date range.</p>
+  </div>
+{% endif %}
+
+</body>
+</html>
