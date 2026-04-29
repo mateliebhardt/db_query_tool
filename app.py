@@ -12,6 +12,17 @@ load_dotenv()
 
 app = Flask(__name__)
 
+
+@app.template_filter("uk_date")
+def uk_date_filter(iso_str):
+    """Format 'YYYY-MM-DD' → 'D Month YYYY' for display."""
+    try:
+        from datetime import datetime
+        d = datetime.strptime(iso_str, "%Y-%m-%d")
+        return f"{d.day} {d.strftime('%B')} {d.year}"
+    except Exception:
+        return iso_str
+
 # ── Database connection ────────────────────────────────────────────────────────
 
 def get_connection():

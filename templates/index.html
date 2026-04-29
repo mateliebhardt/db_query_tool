@@ -43,6 +43,13 @@
     }
     input[type="date"]:focus { border-color: #4a6cf7; }
 
+    .date-label {
+      font-size: .8rem;
+      color: #4a6cf7;
+      font-weight: 500;
+      min-height: 1.1em;
+    }
+
     .btn {
       padding: .5rem 1.2rem;
       border: none;
@@ -120,10 +127,12 @@
       <div class="field">
         <label for="start_date">From</label>
         <input type="date" id="start_date" name="start_date" value="{{ start_date }}" required />
+        <span class="date-label" id="start_label"></span>
       </div>
       <div class="field">
         <label for="end_date">To</label>
         <input type="date" id="end_date" name="end_date" value="{{ end_date }}" required />
+        <span class="date-label" id="end_label"></span>
       </div>
       <button type="submit" class="btn btn-primary">Run Query</button>
     </div>
@@ -138,7 +147,7 @@
 <div class="card">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem;">
     <span class="meta">{{ row_count }} row{{ 's' if row_count != 1 else '' }} returned
-      &nbsp;·&nbsp; {{ start_date }} → {{ end_date }}</span>
+      &nbsp;·&nbsp; {{ start_date | uk_date }} → {{ end_date | uk_date }}</span>
 
     <form method="POST" action="/download">
       <input type="hidden" name="start_date" value="{{ start_date }}" />
@@ -175,5 +184,25 @@
   </div>
 {% endif %}
 
+<script>
+  const MONTHS = ["January","February","March","April","May","June",
+                  "July","August","September","October","November","December"];
+
+  function ukDate(iso) {
+    if (!iso) return "";
+    const [y, m, d] = iso.split("-").map(Number);
+    return `${d} ${MONTHS[m - 1]} ${y}`;
+  }
+
+  function syncLabel(inputId, labelId) {
+    const input = document.getElementById(inputId);
+    const label = document.getElementById(labelId);
+    label.textContent = ukDate(input.value);
+    input.addEventListener("change", () => { label.textContent = ukDate(input.value); });
+  }
+
+  syncLabel("start_date", "start_label");
+  syncLabel("end_date",   "end_label");
+</script>
 </body>
 </html>
