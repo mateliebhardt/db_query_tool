@@ -1,10 +1,12 @@
 import os
 import io
+import re
 from datetime import date, timedelta
 
 import psycopg2
 import psycopg2.extras
 import pandas as pd
+from rapidfuzz import fuzz
 from flask import Flask, render_template, request, send_file, jsonify
 from dotenv import load_dotenv
 
@@ -23,6 +25,22 @@ def uk_date_filter(iso_str):
     except Exception:
         return iso_str
 
+
+# ── Config ─────────────────────────────────────────────────────────────────────
+
+TABLE_NAME     = "your_table"
+DATE_COLUMN    = "created_at"
+
+FILTER_1_COL   = "status"
+FILTER_1_LABEL = "Status"
+
+FILTER_2_COL   = "category"
+FILTER_2_LABEL = "Category"
+
+SEARCH_COL       = "reference"  # column to run the Python-side text search against
+SEARCH_LABEL     = "Reference"
+FUZZY_THRESHOLD  = 80           # 0–100: lower = more lenient, higher = stricter
+
 # ── Database connection ────────────────────────────────────────────────────────
 
 def get_connection():
@@ -34,42 +52,109 @@ def get_connection():
         password=os.environ["DB_PASSWORD"],
     )
 
-# ── Static query ───────────────────────────────────────────────────────────────
-# Edit this query to match your schema.
-# Use %(start_date)s and %(end_date)s as date-range placeholders.
 
-QUERY = """
+def get_dropdown_options(column):
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT DISTINCT {column} FROM {TABLE_NAME} "
+                f"WHERE {column} IS NOT NULL ORDER BY {column}"
+            )
+            return [str(row[0]) for row in cur.fetchall()]
+
+
+# ── Query builder (date + dropdowns only — search is done in Python) ───────────
+
+BASE_QUERY = f"""
 SELECT *
-FROM your_table
-WHERE created_at >= %(start_date)s
-  AND created_at <  %(end_date)s
-ORDER BY created_at DESC
+FROM {TABLE_NAME}
+WHERE {DATE_COLUMN} >= %(start_date)s
+  AND {DATE_COLUMN} <  %(end_date)s
 """
+
+def build_query(filter1, filter2):
+    q = BASE_QUERY
+    params = {}
+    if filter1:
+        q += f"  AND {FILTER_1_COL} = %(filter1)s\n"
+        params["filter1"] = filter1
+    if filter2:
+        q += f"  AND {FILTER_2_COL} = %(filter2)s\n"
+        params["filter2"] = filter2
+    q += f"ORDER BY {DATE_COLUMN} DESC"
+    return q, params
+
+
+# ── Python-side fuzzy search ───────────────────────────────────────────────────
+
+_SEP_RE = re.compile(r"[-_/.\s]+")
+
+def _strip_seps(text: str) -> str:
+    """'GV-001' → 'gv001'  (collapse all separators for code matching)"""
+    return _SEP_RE.sub("", text).lower()
+
+def _fuzzy_hit(term: str, value: str) -> bool:
+    """
+    Two-strategy match optimised for engineering data:
+      1. partial_ratio  — handles typos and case ('vaIve' → 'valve')
+      2. separator-strip — handles code formatting ('GV001' ↔ 'GV-001')
+    """
+    t_low, v_low = term.lower(), value.lower()
+    if fuzz.partial_ratio(t_low, v_low) >= FUZZY_THRESHOLD:
+        return True
+    t_stripped = _strip_seps(term)
+    return bool(t_stripped) and t_stripped in _strip_seps(value)
+
+def apply_search(columns, rows, search):
+    if not search.strip() or SEARCH_COL not in columns:
+        return rows
+    col_idx = columns.index(SEARCH_COL)
+    terms   = search.split()
+    return [
+        row for row in rows
+        if any(_fuzzy_hit(term, str(row[col_idx])) for term in terms)
+    ]
+
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    default_end = date.today()
+    default_end   = date.today()
     default_start = default_end - timedelta(days=30)
 
     start_date = request.form.get("start_date", str(default_start))
     end_date   = request.form.get("end_date",   str(default_end))
+    filter1    = request.form.get("filter1", "")
+    filter2    = request.form.get("filter2", "")
+    search     = request.form.get("search", "").strip()
     error      = None
     columns    = []
     rows       = []
     row_count  = 0
 
-    if request.method == "POST":
+    try:
+        options1 = get_dropdown_options(FILTER_1_COL)
+        options2 = get_dropdown_options(FILTER_2_COL)
+    except Exception as exc:
+        options1, options2 = [], []
+        error = f"Could not load filter options: {exc}"
+
+    if request.method == "POST" and not error:
         try:
+            query, extra_params = build_query(filter1, filter2)
+            params = {"start_date": start_date, "end_date": end_date, **extra_params}
+
             with get_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute(QUERY, {"start_date": start_date, "end_date": end_date})
+                    cur.execute(query, params)
                     results = cur.fetchall()
                     if results:
                         columns = list(results[0].keys())
-                        rows = [list(r.values()) for r in results]
-                    row_count = len(rows)
+                        rows    = [list(r.values()) for r in results]
+
+            rows      = apply_search(columns, rows, search)
+            row_count = len(rows)
         except Exception as exc:
             error = str(exc)
 
@@ -77,6 +162,14 @@ def index():
         "index.html",
         start_date=start_date,
         end_date=end_date,
+        filter1=filter1,
+        filter2=filter2,
+        search=search,
+        filter1_label=FILTER_1_LABEL,
+        filter2_label=FILTER_2_LABEL,
+        search_label=SEARCH_LABEL,
+        options1=options1,
+        options2=options2,
         columns=columns,
         rows=rows,
         row_count=row_count,
@@ -88,14 +181,23 @@ def index():
 def download():
     start_date = request.form.get("start_date")
     end_date   = request.form.get("end_date")
+    filter1    = request.form.get("filter1", "")
+    filter2    = request.form.get("filter2", "")
+    search     = request.form.get("search", "").strip()
 
     try:
+        query, extra_params = build_query(filter1, filter2)
+        params = {"start_date": start_date, "end_date": end_date, **extra_params}
+
         with get_connection() as conn:
-            df = pd.read_sql_query(
-                QUERY,
-                conn,
-                params={"start_date": start_date, "end_date": end_date},
+            df = pd.read_sql_query(query, conn, params=params)
+
+        if search and SEARCH_COL in df.columns:
+            terms = search.split()
+            mask  = df[SEARCH_COL].astype(str).apply(
+                lambda v: any(_fuzzy_hit(t, v) for t in terms)
             )
+            df = df[mask]
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 

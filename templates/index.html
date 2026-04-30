@@ -26,7 +26,7 @@
 
     .filter-row {
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       gap: 1rem;
       align-items: flex-end;
     }
@@ -49,6 +49,64 @@
       font-weight: 500;
       min-height: 1.1em;
     }
+
+    select {
+      padding: .45rem .7rem;
+      border: 1px solid #d0d5dd;
+      border-radius: 6px;
+      font-size: .95rem;
+      background: #fff;
+      outline: none;
+      min-width: 9rem;
+      cursor: pointer;
+    }
+    select:focus { border-color: #4a6cf7; }
+
+    /* ── Tag input ── */
+    .tag-input {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: .3rem;
+      padding: .35rem .5rem;
+      border: 1px solid #d0d5dd;
+      border-radius: 6px;
+      min-width: 12rem;
+      min-height: 2.15rem;
+      background: #fff;
+      cursor: text;
+    }
+    .tag-input:focus-within { border-color: #4a6cf7; }
+
+    .tag-input input {
+      border: none;
+      outline: none;
+      padding: .1rem .2rem;
+      font-size: .88rem;
+      flex: 1;
+      min-width: 5rem;
+      background: transparent;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: .25rem;
+      background: #e8eeff;
+      color: #2c3e6b;
+      border-radius: 5px;
+      padding: .18rem .5rem;
+      font-size: .82rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .tag-x {
+      cursor: pointer;
+      font-size: .7rem;
+      color: #7a8fc4;
+      line-height: 1;
+    }
+    .tag-x:hover { color: #c0392b; }
 
     .btn {
       padding: .5rem 1.2rem;
@@ -134,7 +192,42 @@
         <input type="date" id="end_date" name="end_date" value="{{ end_date }}" required />
         <span class="date-label" id="end_label"></span>
       </div>
-      <button type="submit" class="btn btn-primary">Run Query</button>
+      <div class="field">
+        <label for="filter1">{{ filter1_label }}</label>
+        <select id="filter1" name="filter1">
+          <option value="">All</option>
+          {% for opt in options1 %}
+          <option value="{{ opt }}" {{ 'selected' if filter1 == opt }}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+        <span class="date-label"></span>
+      </div>
+
+      <div class="field">
+        <label for="filter2">{{ filter2_label }}</label>
+        <select id="filter2" name="filter2">
+          <option value="">All</option>
+          {% for opt in options2 %}
+          <option value="{{ opt }}" {{ 'selected' if filter2 == opt }}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+        <span class="date-label"></span>
+      </div>
+
+      <div class="field">
+        <label>{{ search_label }}</label>
+        <div class="tag-input" id="tagBox">
+          <input type="text" id="tagTyping" placeholder="Type &amp; press Enter…" autocomplete="off" />
+        </div>
+        <input type="hidden" name="search" id="searchHidden" value="{{ search }}" />
+        <span class="date-label"></span>
+      </div>
+
+      <div class="field">
+        <label>&nbsp;</label>
+        <button type="submit" class="btn btn-primary">Run Query</button>
+        <span class="date-label"></span>
+      </div>
     </div>
   </form>
 </div>
@@ -143,7 +236,7 @@
   <div class="error"><strong>Error:</strong> {{ error }}</div>
 {% endif %}
 
-{% if columns %}
+{% if columns and rows %}
 <div class="card">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.75rem;">
     <span class="meta">{{ row_count }} row{{ 's' if row_count != 1 else '' }} returned
@@ -152,6 +245,9 @@
     <form method="POST" action="/download">
       <input type="hidden" name="start_date" value="{{ start_date }}" />
       <input type="hidden" name="end_date"   value="{{ end_date }}" />
+      <input type="hidden" name="filter1"    value="{{ filter1 }}" />
+      <input type="hidden" name="filter2"    value="{{ filter2 }}" />
+      <input type="hidden" name="search"     value="{{ search }}" />
       <button type="submit" class="btn btn-success">⬇ Download Excel</button>
     </form>
   </div>
@@ -185,6 +281,7 @@
 {% endif %}
 
 <script>
+  // ── Date labels ──────────────────────────────────────────────────────────────
   const MONTHS = ["January","February","March","April","May","June",
                   "July","August","September","October","November","December"];
 
@@ -203,6 +300,52 @@
 
   syncLabel("start_date", "start_label");
   syncLabel("end_date",   "end_label");
+
+  // ── Tag input ────────────────────────────────────────────────────────────────
+  (function () {
+    const box    = document.getElementById("tagBox");
+    const typing = document.getElementById("tagTyping");
+    const hidden = document.getElementById("searchHidden");
+
+    function syncHidden() {
+      const vals = [...box.querySelectorAll(".tag-val")].map(el => el.textContent);
+      hidden.value = vals.join(" ");
+    }
+
+    function addTag(word) {
+      word = word.trim();
+      if (!word) return;
+      const existing = [...box.querySelectorAll(".tag-val")].map(el => el.textContent.toLowerCase());
+      if (existing.includes(word.toLowerCase())) return;
+
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.innerHTML = `<span class="tag-val">${word}</span><span class="tag-x">✕</span>`;
+      tag.querySelector(".tag-x").addEventListener("click", () => { tag.remove(); syncHidden(); });
+      box.insertBefore(tag, typing);
+      syncHidden();
+    }
+
+    // Restore tags from server value (after form submit)
+    const initial = hidden.value.trim();
+    if (initial) initial.split(/\s+/).forEach(addTag);
+
+    typing.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        addTag(typing.value);
+        typing.value = "";
+      }
+      // Backspace on empty input removes the last tag
+      if (e.key === "Backspace" && typing.value === "") {
+        const tags = box.querySelectorAll(".tag");
+        if (tags.length) { tags[tags.length - 1].remove(); syncHidden(); }
+      }
+    });
+
+    // Clicking anywhere in the box focuses the text input
+    box.addEventListener("click", () => typing.focus());
+  })();
 </script>
 </body>
 </html>
